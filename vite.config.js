@@ -15,4 +15,9 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
+  base: '/vue-pkpm/',
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets'
+  }
 })
