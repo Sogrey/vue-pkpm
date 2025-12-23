@@ -138,4 +138,8 @@ serviceConfig: {
 
 ## 许可证
 
-本项目基于 Apache License 2.0 许可证开源。
+本项目基于 [MIT 许可证](LICENSE) 开源。
+
+---
+
+Copyright © 2025 [Sogrey](https://github.com/Sogrey)
