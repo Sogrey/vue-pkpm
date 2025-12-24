@@ -24,6 +24,26 @@ const router = createRouter({
       name: 'obv-doc',
       component: () => import('../views/OBVDocView.vue'),
     },
+    {
+      path: '/obv-3dtiles',
+      name: 'obv-3dtiles',
+      component: () => import('../views/OBV3DTilesView.vue'),
+    },
+    {
+      path: '/obv-osgbzip',
+      name: 'obv-osgbzip',
+      component: () => import('../views/OBVOsgbzipView.vue'),
+    },
+    {
+      path: '/obv-pnts-tileset',
+      name: 'obv-pnts-tileset',
+      component: () => import('../views/OBVPntsTilesetView.vue'),
+    },
+    {
+      path: '/obv-tifzip',
+      name: 'obv-tifzip',
+      component: () => import('../views/OBVTifzipView.vue'),
+    },
   ],
 })
 

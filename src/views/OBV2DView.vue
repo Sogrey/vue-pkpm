@@ -6,6 +6,15 @@
         {{ loading ? '加载中...' : '加载模型' }}
       </button>
     </div>
+    <div v-if="obvApi" class="view-controls">
+      <button @click="getViewerState" class="state-btn">获取当前视图</button>
+      <button @click="setViewerState" :disabled="!viewerState" class="state-btn">
+        设置当前视图
+      </button>
+    </div>
+    <div v-if="message" class="message-toast">
+      {{ message }}
+    </div>
     <div id="obv-view" class="obv-viewer"></div>
   </div>
 </template>
@@ -16,15 +25,33 @@ import { ref, onMounted, onUnmounted } from 'vue'
 // 定义urn，模型的唯一标识
 const urn = ref('urn:bimbox.object:viewing_bucket/drawComparison_A')
 const loading = ref(false)
+const message = ref('')
 let obvApi = null
+let viewerState = null
+let activeLayout = null
+let messageTimer = null
 
 // 访问的令牌
-const accessToken = 'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY1NDEwMTUsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIwNDdhN2FlYS0xNGFiLTRiZmItOWI2YS1mOTk4NGU4NDI3ZDMifQ.AEUmFiHv1wmXRu3Jp3iZ70J1PbrSPsN6sN23EJeTheVpJ4W6i1O6bjF_L5ALa4RFtGyp15Fivlv1sbjfk2R5ftzDFMMjnqZ-En4afrsB6fgQ7dMVPs-Q5VwZgakBaRLFt_8AADzl48ptKlOf4aJmaY2KtDiY87S-TFHuG3tcncpI5cefPanD-_GRKUbEySgd92cJIzdMunh2QXd0qYL_PgrttubXuls_rLxoXg4QGIwJzsJTTNYqeeOynRFvofVmxtMPuGMoE6Bd-1oUVcaKVKIhzJC_Nls07fd8Eltbtw6Nw2O2P3Zca1y7tFqPAjzLHpp4Sr5NtcAEbO5gSFoyGw'
+const accessToken =
+  'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
+
 const expiresIn = 600000
 
+// 访问的令牌 getAccessToken 和 令牌有效期 expiresIn
 // 获取token值
 function getAccessToken(cb) {
   cb(accessToken, expiresIn)
+}
+
+// 显示消息的辅助函数
+function showMessage(text, duration = 3000) {
+  message.value = text
+  if (messageTimer) {
+    clearTimeout(messageTimer)
+  }
+  messageTimer = setTimeout(() => {
+    message.value = ''
+  }, duration)
 }
 
 async function loadModel() {
@@ -33,8 +60,9 @@ async function loadModel() {
   loading.value = true
 
   try {
-    // 创建实例需要传入的参数
+    // 创建实例需要传入的参数，部署环境serviceConfig 和 用户有效期getAccessToken
     const applicationOptions = {
+      // 配置 OBV 服务端（BIMServer）API 服务的 origin，这个适合于私有部署的用户使用
       getAccessToken: getAccessToken,
       refreshAccessToken: getAccessToken,
       serviceConfig: {
@@ -47,8 +75,8 @@ async function loadModel() {
     const builder = new OBV.Api.ObvBuilder()
     // 创建 Application 对象
     const application = await builder.buildApplication(applicationOptions)
-    // 创建 document 管理视图
-    const obvDocument = await builder.loadDocument(application, urn.value)
+    // 创建 document 管理视图，加载完成后可以调用接口
+    const obvDocument = await builder.loadDocument(application, urn.value, 'dwg-lod')
     // 创建 viewer 容器, 创建API
     obvApi = await builder.buildViewer2d(application, document.getElementById('obv-view'))
     // 获取二维视图
@@ -58,11 +86,65 @@ async function loadModel() {
       viewer2dItem: viewer2dItems[0],
     })
 
-    console.log('2D模型加载成功')
+    // 暴露到全局，方便调试
+    window.obvApi = obvApi
+
+    showMessage('2D图纸加载成功')
+    console.log('2D图纸加载成功')
   } catch (error) {
-    console.error('2D模型加载失败:', error)
+    console.error('2D图纸加载失败:', error)
+    let errorMessage = '图纸加载失败'
+
+    // 安全地获取错误消息
+    const errorMsg = error && error.message ? error.message : String(error)
+
+    if (errorMsg.includes('network')) {
+      errorMessage = '网络连接失败，请检查网络连接'
+    } else if (errorMsg.includes('token')) {
+      errorMessage = '访问令牌无效，请重新授权'
+    } else {
+      errorMessage = '图纸加载失败：' + errorMsg
+    }
+
+    showMessage(errorMessage)
   } finally {
     loading.value = false
+  }
+}
+
+// 获取当前视图状态
+function getViewerState() {
+  if (!obvApi) return
+
+  try {
+    // 获取视图当前显示状态
+    viewerState = obvApi.getViewerState()
+    console.log('当前视图状态:', viewerState)
+    showMessage('已获取当前视角信息')
+  } catch (error) {
+    console.error('获取视图状态失败:', error)
+    showMessage('获取视图状态失败：' + error.message)
+  }
+}
+
+// 设置当前视图状态
+function setViewerState() {
+  if (!obvApi || !viewerState) return
+
+  try {
+    if (obvApi.viewer.v2dType === 'vectorDraw') {
+      activeLayout = obvApi.getActiveLayout()
+      const vc = viewerState.viewCenter
+      activeLayout.ViewCenter = [vc[0], vc[1], vc[2]]
+      activeLayout.ViewSize = viewerState.viewSize
+      obvApi.redraw()
+    } else {
+      obvApi.setViewerState(viewerState)
+    }
+    showMessage('视图状态设置成功')
+  } catch (error) {
+    console.error('设置视图状态失败:', error)
+    showMessage('设置视图状态失败：' + error.message)
   }
 }
 
@@ -78,6 +160,9 @@ onUnmounted(() => {
   // 清理资源
   if (obvApi) {
     obvApi = null
+  }
+  if (messageTimer) {
+    clearTimeout(messageTimer)
   }
 })
 </script>
@@ -101,7 +186,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: 
+  background:
     radial-gradient(circle at 20% 80%, rgba(0, 255, 255, 0.1) 0%, transparent 50%),
     radial-gradient(circle at 80% 20%, rgba(255, 0, 255, 0.1) 0%, transparent 50%),
     radial-gradient(circle at 40% 40%, rgba(0, 123, 255, 0.05) 0%, transparent 50%);
@@ -117,12 +202,10 @@ onUnmounted(() => {
   display: flex;
   gap: 16px;
   align-items: center;
-  background: linear-gradient(135deg, 
-    rgba(20, 25, 40, 0.95) 0%, 
-    rgba(15, 20, 35, 0.9) 100%);
+  background: linear-gradient(135deg, rgba(20, 25, 40, 0.95) 0%, rgba(15, 20, 35, 0.9) 100%);
   padding: 20px 28px;
   border-radius: 16px;
-  box-shadow: 
+  box-shadow:
     0 20px 60px rgba(0, 0, 0, 0.4),
     0 0 0 1px rgba(0, 255, 255, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -140,12 +223,7 @@ onUnmounted(() => {
   left: -100%;
   width: 100%;
   height: 2px;
-  background: linear-gradient(90deg, 
-    transparent, 
-    #00ffff, 
-    #ff00ff, 
-    #00ffff, 
-    transparent);
+  background: linear-gradient(90deg, transparent, #00ffff, #ff00ff, #00ffff, transparent);
   animation: scanline 3s linear infinite;
 }
 
@@ -156,10 +234,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, 
-    transparent, 
-    rgba(0, 255, 255, 0.8), 
-    transparent);
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 255, 0.8), transparent);
 }
 
 @keyframes slideDown {
@@ -174,8 +249,12 @@ onUnmounted(() => {
 }
 
 @keyframes scanline {
-  0% { left: -100%; }
-  100% { left: 100%; }
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
 }
 
 .urn-input {
@@ -184,15 +263,13 @@ onUnmounted(() => {
   border: 2px solid rgba(0, 255, 255, 0.3);
   border-radius: 12px;
   font-size: 15px;
-  background: linear-gradient(135deg, 
-    rgba(10, 15, 30, 0.8) 0%, 
-    rgba(5, 10, 20, 0.6) 100%);
+  background: linear-gradient(135deg, rgba(10, 15, 30, 0.8) 0%, rgba(5, 10, 20, 0.6) 100%);
   color: #e0e6ff;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   min-width: 0;
   font-family: 'Courier New', monospace;
   letter-spacing: 0.5px;
-  box-shadow: 
+  box-shadow:
     inset 0 2px 8px rgba(0, 0, 0, 0.3),
     0 0 0 1px rgba(0, 255, 255, 0.1);
 }
@@ -206,22 +283,17 @@ onUnmounted(() => {
 .urn-input:focus {
   outline: none;
   border-color: #00ffff;
-  box-shadow: 
+  box-shadow:
     0 0 0 3px rgba(0, 255, 255, 0.2),
     0 0 20px rgba(0, 255, 255, 0.3),
     inset 0 2px 8px rgba(0, 0, 0, 0.3);
-  background: linear-gradient(135deg, 
-    rgba(10, 15, 30, 0.95) 0%, 
-    rgba(5, 10, 20, 0.8) 100%);
+  background: linear-gradient(135deg, rgba(10, 15, 30, 0.95) 0%, rgba(5, 10, 20, 0.8) 100%);
   transform: translateY(-1px);
 }
 
 .load-btn {
   padding: 14px 28px;
-  background: linear-gradient(135deg, 
-    #00ffff 0%, 
-    #0099cc 50%, 
-    #00ffff 100%);
+  background: linear-gradient(135deg, #00ffff 0%, #0099cc 50%, #00ffff 100%);
   background-size: 200% 200%;
   color: #0a0e27;
   border: 2px solid rgba(0, 255, 255, 0.5);
@@ -235,7 +307,7 @@ onUnmounted(() => {
   overflow: hidden;
   text-transform: uppercase;
   letter-spacing: 1px;
-  box-shadow: 
+  box-shadow:
     0 4px 20px rgba(0, 255, 255, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
@@ -247,10 +319,7 @@ onUnmounted(() => {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, 
-    transparent, 
-    rgba(255, 255, 255, 0.4), 
-    transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
   transition: left 0.6s ease;
 }
 
@@ -269,7 +338,7 @@ onUnmounted(() => {
 
 .load-btn:hover:not(:disabled) {
   transform: translateY(-3px) scale(1.02);
-  box-shadow: 
+  box-shadow:
     0 8px 30px rgba(0, 255, 255, 0.5),
     0 0 0 3px rgba(0, 255, 255, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
@@ -292,15 +361,99 @@ onUnmounted(() => {
 }
 
 .load-btn:disabled {
-  background: linear-gradient(135deg, 
-    rgba(60, 60, 60, 0.3) 0%, 
-    rgba(40, 40, 40, 0.2) 100%);
+  background: linear-gradient(135deg, rgba(60, 60, 60, 0.3) 0%, rgba(40, 40, 40, 0.2) 100%);
   color: rgba(160, 160, 160, 0.5);
   cursor: not-allowed;
   transform: none;
   opacity: 0.6;
   border-color: rgba(80, 80, 80, 0.3);
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.view-controls {
+  position: absolute;
+  z-index: 99;
+  top: 160px;
+  right: 8px;
+  display: flex;
+  flex-wrap: wrap-reverse;
+  flex-direction: column;
+}
+
+.state-btn {
+  border-radius: 30px;
+  margin-top: 20px;
+  margin-right: 20px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #00ffff 0%, #0099cc 100%);
+  color: #0a0e27;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.state-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 255, 255, 0.4);
+}
+
+.state-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .view-controls {
+    top: 110px !important;
+    right: 0 !important;
+  }
+  .state-btn {
+    font-size: 12px;
+    padding: 0 10px;
+    margin-top: 10px;
+    margin-right: 10px;
+  }
+}
+
+.message-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.9), rgba(20, 20, 20, 0.9));
+  color: #00ffff;
+  padding: 20px 30px;
+  border-radius: 12px;
+  border: 2px solid rgba(0, 255, 255, 0.3);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  font-size: 14px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+  animation: fadeInOut 3s ease-in-out;
+  white-space: nowrap;
+  max-width: 80%;
+  text-align: center;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
 }
 
 .obv-viewer {
@@ -322,7 +475,7 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background-image: 
+  background-image:
     linear-gradient(rgba(0, 255, 255, 0.03) 1px, transparent 1px),
     linear-gradient(90deg, rgba(0, 255, 255, 0.03) 1px, transparent 1px);
   background-size: 50px 50px;
@@ -343,17 +496,17 @@ onUnmounted(() => {
     padding: 18px;
     border-radius: 12px;
   }
-  
+
   .controls::before {
     height: 3px;
   }
-  
+
   .urn-input {
     width: 100%;
     min-width: 0;
     padding: 12px 16px;
   }
-  
+
   .load-btn {
     width: 100%;
     min-width: auto;
@@ -370,12 +523,12 @@ onUnmounted(() => {
     border-radius: 10px;
     gap: 12px;
   }
-  
+
   .urn-input {
     padding: 11px 14px;
     font-size: 14px;
   }
-  
+
   .load-btn {
     padding: 11px 20px;
     font-size: 14px;

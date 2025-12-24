@@ -6,6 +6,9 @@
         {{ loading ? '加载中...' : '加载模型' }}
       </button>
     </div>
+    <div v-if="message" class="message-toast">
+      {{ message }}
+    </div>
     <div id="obv-view" class="obv-viewer"></div>
   </div>
 </template>
@@ -13,17 +16,30 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 
-const urn = ref('urn:bimbox.object:viewing_bucket/doc-model')
+const urn = ref('urn:bimbox.object:viewing_bucket/pdf-demo')
 const loading = ref(false)
+const message = ref('')
 let obvApi = null
+let messageTimer = null
 
 // 访问的令牌
-const accessToken = ''
+const accessToken = 'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
 const expiresIn = 600000
 
 // 获取token值
 function getAccessToken(cb) {
   cb(accessToken, expiresIn)
+}
+
+// 显示消息的辅助函数
+function showMessage(text, duration = 3000) {
+  message.value = text
+  if (messageTimer) {
+    clearTimeout(messageTimer)
+  }
+  messageTimer = setTimeout(() => {
+    message.value = ''
+  }, duration)
 }
 
 async function loadModel() {
@@ -32,8 +48,9 @@ async function loadModel() {
   loading.value = true
 
   try {
-    // 创建实例需要传入的参数
+    // 创建实例需要传入的参数，部署环境serviceConfig 和 用户有效期getAccessToken
     const applicationOptions = {
+      // 配置 OBV 服务端（BIMServer）API 服务的 origin，这个适合于私有部署的用户使用
       getAccessToken: getAccessToken,
       refreshAccessToken: getAccessToken,
       serviceConfig: {
@@ -42,24 +59,42 @@ async function loadModel() {
       },
     }
 
-    // 定义urn，模型的唯一标识
-    // urn:bimbox.object:{bucket_key}/{object_key}
-
-    // 创建一个viewer类，用于模型加载
+    // 实例化 Builder，用于模型加载
     const builder = new OBV.Api.ObvBuilder()
-    // 创建一个对象（实例化）
+    // 创建 Application 对象
     const application = await builder.buildApplication(applicationOptions)
-    // 加载 document 管理视图，加载完成后可以调用接口
+    // 创建 document 管理视图，加载完成后可以调用接口
     const obvDocument = await builder.loadDocument(application, urn.value)
     // 创建 viewer 容器, 创建API
     obvApi = await builder.buildViewerDoc(application, document.getElementById('obv-view'))
+
     // 获取Doc视图
     const viewerDocItems = obvDocument.getDocItems()
     builder.loadDocModels(obvApi, obvDocument, viewerDocItems[0])
 
-    console.log('文档模型加载成功')
+    // 暴露到全局，方便调试
+    window.obvApi = obvApi
+
+    showMessage('文档加载成功')
+    console.log('文档加载成功')
   } catch (error) {
-    console.error('文档模型加载失败:', error)
+    console.error('文档加载失败:', error)
+    let errorMessage = '文档加载失败'
+    
+    // 安全地获取错误消息
+    const errorMsg = error && error.message ? error.message : String(error)
+    
+    if (errorMsg.includes('network')) {
+      errorMessage = '网络连接失败，请检查网络连接'
+    } else if (errorMsg.includes('token')) {
+      errorMessage = '访问令牌无效，请重新授权'
+    } else if (errorMsg.includes('file') || errorMsg.includes('format')) {
+      errorMessage = '文档格式不支持或文件损坏'
+    } else {
+      errorMessage = '文档加载失败：' + errorMsg
+    }
+    
+    showMessage(errorMessage)
   } finally {
     loading.value = false
   }
@@ -77,6 +112,9 @@ onUnmounted(() => {
   // 清理资源
   if (obvApi) {
     obvApi = null
+  }
+  if (messageTimer) {
+    clearTimeout(messageTimer)
   }
 })
 </script>
@@ -300,6 +338,46 @@ onUnmounted(() => {
   opacity: 0.6;
   border-color: rgba(80, 80, 80, 0.3);
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.message-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.9), rgba(30, 10, 45, 0.9));
+  color: #ff00ff;
+  padding: 20px 30px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 0, 255, 0.3);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  font-size: 14px;
+  font-weight: 500;
+  backdrop-filter: blur(10px);
+  animation: fadeInOut 3s ease-in-out;
+  white-space: nowrap;
+  max-width: 80%;
+  text-align: center;
+}
+
+@keyframes fadeInOut {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  85% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.9);
+  }
 }
 
 .obv-viewer {

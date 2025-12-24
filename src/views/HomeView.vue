@@ -26,6 +26,34 @@
         <p>完整的文档管理和查看</p>
         <router-link to="/obv-doc" class="feature-btn"> 进入文档查看器 </router-link>
       </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🏢</div>
+        <h3>3DTiles查看器</h3>
+        <p>Cesium 3DTiles大规模模型加载</p>
+        <router-link to="/obv-3dtiles" class="feature-btn"> 进入3DTiles查看器 </router-link>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🗺️</div>
+        <h3>倾斜摄影查看器</h3>
+        <p>OSGB倾斜摄影模型加载与GIS融合</p>
+        <router-link to="/obv-osgbzip" class="feature-btn"> 进入倾斜摄影查看器 </router-link>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>点云查看器</h3>
+        <p>点云模型加载与参数调整</p>
+        <router-link to="/obv-pnts-tileset" class="feature-btn"> 进入点云查看器 </router-link>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🗺️</div>
+        <h3>TIF影像查看器</h3>
+        <p>TIF影像加载与GIS地图集成</p>
+        <router-link to="/obv-tifzip" class="feature-btn"> 进入TIF影像查看器 </router-link>
+      </div>
     </div>
 
     <div class="info-section">
@@ -64,13 +92,10 @@ h1 {
 }
 
 .features-grid {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 2rem;
   margin-bottom: 3rem;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-content: center;
-  justify-content: space-around;
   align-items: center;
 }
 

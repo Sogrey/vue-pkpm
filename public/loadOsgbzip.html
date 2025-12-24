@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+    <html lang="en">
+        <head>
+        <meta charset="UTF-8"  name="viewport" content="width=device-width,initial-scale=1.0" />
+        <title>Title</title>
+        <link rel="stylesheet" href="https://api.cloud.pkpm.cn/bimviewer/viewer/v5/obv.css" type="text/css" />
+        <link rel="resource" type="application/l10n" href="https://api.cloud.pkpm.cn/bimviewer/viewer/v5/locale/locale.properties">
+        <script src="https://api.cloud.pkpm.cn/bimviewer/viewer/v5/obv.js"></script>
+        <link rel="stylesheet" href="https://cloud.pkpm.cn/playground/lod/examples/css/uikit.min.css" />
+        <script src="https://lib.baomitu.com/echarts/4.7.0/echarts-en.min.js"></script>
+        <style>
+            @media (max-width: 760px) {
+              .my-obv-domContainer {
+                top: 110px !important;
+                right: 0 !important;
+                /*display: block !important;*/
+              }
+              .my-obv-domContainer button {
+                font-size: 12px;
+                padding: 0 10px;
+              }
+            }
+            html, body {
+              width: 100%;
+              height: 100%;
+              margin: 0px;
+              padding: 0px;
+              background: #3c3f41;
+            }
+            .my-obv-viewer {
+              position: relative;
+              width: 100%;
+              height: 100%;
+              display: inline-block;
+            }
+            .my-obv-domContainer {
+              position: absolute;
+              z-index: 99;
+              top: 160px;
+              right: 8px;
+              display: flex;
+              flex-wrap: wrap-reverse;
+              flex-direction: column;
+            }
+            .my-obv-domContainer button {
+              border-radius: 30px;
+              margin-top: 20px;
+              margin-right: 20px;
+              float: right;
+            }
+        </style>
+        </head>
+        <body>
+            <div id="viewer" class="my-obv-viewer"></div>
+<div id="domContainer" class="my-obv-domContainer">
+    <label>
+        设置高度值:
+        <span id="obliqueHeight" class="obliqueHeight" style="color:blue; width: 60px;display: inline-block;"></span>
+        <input id="obliqueHeightRange" type="range" value="-420" min="-500" max="0" step="1"
+               style="margin:10px 10px 10px 5px"/>
+    </label>
+    <button id="createGisMap" class="uk-button uk-button-primary">载入GIS</button>
+    <button id="removeGisMap" class="uk-button uk-button-primary">卸载GIS</button>
+    <button id="mergeBimModel" class="uk-button uk-button-primary">载入BIM模型</button>
+    <button id="unloadBimModel" class="uk-button uk-button-primary">卸载BIM模型</button>
+</div>
+            <script type="module">
+            let obvApi;
+async function main() {
+    // 创建实例需要传入的参数，部署环境serviceConfig 和 用户有效期getAccessToken
+    const applicationOptions = {
+        // 配置 OBV 服务端（BIMServer）API 服务的 origin，这个适合于私有部署的用户使用
+        getAccessToken: getAccessToken,
+        serviceConfig: {
+            origin: 'https://api.cloud.pkpm.cn',
+            apiContextPath: '/bimserver/viewing/v3',
+        },
+    };
+    // 定义urn，模型的唯一标识
+    let osgbUrn = 'urn:bimbox.object:viewing_bucket/osgb-model';
+    let bimUrn = 'urn:bimbox.object:viewing_bucket/rvt-model';
+    let urnList = [
+        {
+            urn: osgbUrn,
+            jobType: 'osgbzip-lod'
+        }, {
+            urn: bimUrn,
+            jobType: 'rvt-lod'
+        }
+    ]
+
+    // 实例化 Builder，用于模型加载
+    const builder = new OBV.Api.ObvBuilder();
+    // 创建 Application 对象
+    const application = await builder.buildApplication(applicationOptions);
+    // 分别创建每个模型的document 管理视图
+    const urnMap = new Map();
+    for (let i = 0; i < urnList.length; i++) {
+        // 创建 document 管理视图，加载完成后可以调用接口
+        const document = await builder.loadDocument(application, urnList[i].urn, urnList[i].jobType);
+        urnMap.set(urnList[i].urn, document);
+    }
+    const options = {
+        applicationId: application.id,
+        gisType: 'oblique'
+    }
+    // 创建 viewer 容器, 创建API
+    // 重要提示：如果在响应式框架如Vue/React/Angular中加载OBV，不要将obvApi变成响应式对象，会导致页面卡顿甚至崩溃！！！
+    // 详细解释见：https://cloud.pkpm.cn/devcenter/commonQuestion/#2-1&7
+    obvApi = await builder.buildViewer3d(application, document.getElementById('viewer'));
+    // 获取三维视图
+    await obvApi.createGisTileset(urnMap.get(osgbUrn), options);
+    //设定倾斜摄影模型的高度
+    obvApi.setGisTilesetHeight('oblique', -420, osgbUrn);
+    //切换为主视图，使移动后的倾斜摄影模型居中展示
+    obvApi.setRequestHomeView();
+
+    let haveMap = false;
+    let haveBimModel = false;
+
+    //加载map
+    document.getElementById('createGisMap').onclick = async function () {
+        if (!haveMap) {
+            const gisPos = obvApi.getGisTilesetPosition('oblique', osgbUrn);
+            console.log(gisPos.longitude, gisPos.latitude);
+            obvApi.createGisMap(gisPos.longitude, gisPos.latitude);
+            obvApi.setRequestHomeView();
+            haveMap = true;
+        } else {
+            alert('GisMap已经加载');
+        }
+    };
+
+    document.getElementById('removeGisMap').onclick = async function () {
+        if (haveMap) {
+            obvApi.removeGisMap();
+            haveMap = false;
+        } else {
+            alert('GisMap已经卸载');
+        }
+    };
+
+    //加载BIM
+    const obliqueHeightRange = document.getElementById('obliqueHeightRange');
+    const obliqueHeight = document.getElementById('obliqueHeight');
+    obliqueHeight.innerText = '-420.0';
+    obliqueHeightRange.oninput = () => {
+        let height = obliqueHeightRange.value;
+        const val = parseFloat(height);
+        const formattedSize = val.toFixed(1);
+        obliqueHeight.innerText = formattedSize;
+        obvApi.setGisTilesetHeight('oblique', val, osgbUrn);
+    };
+
+    document.getElementById('mergeBimModel').onclick = async function () {
+        if (!haveMap) {
+            alert('请先加载GisMap');
+            return;
+        }
+        if (!haveBimModel) {
+            //加载BIM模型,实现合模
+            const bimDocument = urnMap.get(bimUrn);
+            const viewer3dItems = bimDocument.get3dGeometryItems();
+            await builder.load3dModels(obvApi, {
+                obvDocument: bimDocument,
+                viewer3dItem: viewer3dItems[0],
+                modelOffset: { x: 650, y: -180, z: 5 },
+            });
+            haveBimModel = true;
+        } else {
+            alert('Bim模型已经加载');
+        }
+    };
+
+    document.getElementById('unloadBimModel').onclick = async function () {
+        if (haveBimModel) {
+            const ids = obvApi.getModelIds();
+            for (let i = 0; i < ids.length; i++) {
+                let model = obvApi.getModelById(ids[i]);
+                obvApi.unloadModel(ids[i]);
+                model.dispose();
+                model = null;
+            }
+            haveBimModel = false;
+        } else {
+            alert('Bim模型已经卸载');
+        }
+    };
+}
+
+// 调用main函数进行代码的实现
+main();
+// 访问的令牌 getAccessToken 和 令牌有效期 expiresIn 
+function getAccessToken(callBack) {
+    callBack('eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw', 36000)
+}
+
+            </script>
+        </body>
+    </html>
