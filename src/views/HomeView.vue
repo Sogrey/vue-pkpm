@@ -1,4 +1,4 @@
-<template>
+直接访问/直接刷新这个页面<template>
   <div class="home">
     <div class="welcome-section">
       <h1>欢迎使用 PKPM OBV Vue Demo</h1>
