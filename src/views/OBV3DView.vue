@@ -19,118 +19,88 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { defaultUrns, modelTypes } from '../config/obv-config.js'
+import { MessageManager, ErrorHandler, BaseOBVLoader, CoordinateUtils, ValidationUtils } from '../utils/obv-utils.js'
 
-const urn = ref('urn:bimbox.object:viewing_bucket/rvt-model')
+const urn = ref(defaultUrns['3d'])
 const loading = ref(false)
 const message = ref('')
 let obvApi = null
-let messageTimer = null
-
-// 访问的令牌
-const accessToken =
-  'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
-
-const expiresIn = 600000
-
-// 访问的令牌 getAccessToken 和 令牌有效期 expiresIn
-// 获取token值
-function getAccessToken(cb) {
-  cb(accessToken, expiresIn)
-}
+let loader = null
+let messageManager = null
 
 async function loadModel() {
-  if (!urn.value) return
+  if (!urn.value || !ValidationUtils.validateURN(urn.value)) {
+    messageManager.showMessage(setMessage, '请输入有效的模型URN')
+    return
+  }
 
   loading.value = true
 
   try {
-    // 创建实例需要传入的参数，部署环境serviceConfig 和 用户有效期getAccessToken
-    const applicationOptions = {
-      // 配置 OBV 服务端（BIMServer）API 服务的 origin，这个适合于私有部署的用户使用
-      getAccessToken: getAccessToken,
-      refreshAccessToken: getAccessToken,
-      serviceConfig: {
-        origin: 'https://api.cloud.pkpm.cn',
-        apiContextPath: '/bimserver/viewing/v3',
-      },
+    // 初始化加载器
+    loader = new BaseOBVLoader()
+    
+    // 检查库是否加载
+    const obvCheck = ValidationUtils.checkOBVLibrary()
+    if (!obvCheck.valid) {
+      throw new Error(obvCheck.message)
     }
 
-    // 创建一个viewer类，用于模型加载
-    const builder = new OBV.Api.ObvBuilder()
-    // 创建一个对象（实例化）
-    const application = await builder.buildApplication(applicationOptions)
-    // 创建 document 管理视图，加载完成后可以调用接口
-    const obvDocument = await builder.loadDocument(application, urn.value, 'rvt-lod')
-    // 创建 viewer 容器, 创建API
-    obvApi = await builder.buildViewer3d(application, document.getElementById('obv-view'))
-    // 获取三维视图
+    const threeCheck = ValidationUtils.checkTHREELibrary()
+    if (!threeCheck.valid) {
+      throw new Error(threeCheck.message)
+    }
+
+    // 检查容器
+    const containerCheck = ValidationUtils.validateContainer(document.getElementById('obv-view'))
+    if (!containerCheck.valid) {
+      throw new Error(containerCheck.message)
+    }
+
+    // 加载文档
+    const obvDocument = await loader.loadDocument(urn.value, modelTypes['3d'])
+    
+    // 创建3D查看器
+    obvApi = await loader.create3DViewer(document.getElementById('obv-view'))
+    
+    // 获取三维视图并加载模型
     const viewer3dItems = obvDocument.get3dGeometryItems()
-    builder.load3dModels(obvApi, {
-      obvDocument: obvDocument,
-      viewer3dItem: viewer3dItems[0],
-    })
+    await loader.load3DModel(obvDocument, viewer3dItems[0])
 
     // 暴露到全局，方便调试
-    window.obvApi = obvApi
+    loader.exposeToGlobal()
 
-    showMessage('3D模型加载成功')
+    messageManager.showMessage(setMessage, '3D模型加载成功')
     console.log('3D模型加载成功')
   } catch (error) {
     console.error('3D模型加载失败:', error)
-    let errorMessage = '模型加载失败'
-    
-    // 安全地获取错误消息
-    const errorMsg = error && error.message ? error.message : String(error)
-    
-    if (errorMsg.includes('Bad File Format')) {
-      errorMessage = '环境贴图格式错误，正在使用简化模式...'
-    } else if (errorMsg.includes('HDR')) {
-      errorMessage = 'HDR 环境贴图加载失败，已禁用环境贴图'
-    } else if (errorMsg.includes('network')) {
-      errorMessage = '网络连接失败，请检查网络连接'
-    } else {
-      errorMessage = '模型加载失败：' + errorMsg
-    }
-    
-    showMessage(errorMessage)
+    const errorMessage = ErrorHandler.handleError(error, '3D模型')
+    messageManager.showMessage(setMessage, errorMessage)
   } finally {
     loading.value = false
   }
 }
 
-// 显示消息的辅助函数
-function showMessage(text, duration = 3000) {
+// 设置消息的函数
+function setMessage(text) {
   message.value = text
-  if (messageTimer) {
-    clearTimeout(messageTimer)
-  }
-  messageTimer = setTimeout(() => {
-    message.value = ''
-  }, duration)
 }
 
 // 世界坐标转屏幕坐标
 function worldToClient() {
   if (!obvApi) return
 
-  try {
-    // 确保 THREE 对象存在
-    if (typeof THREE === 'undefined') {
-      showMessage('THREE.js 库未加载，请刷新页面重试')
-      return
-    }
-
-    const screenCoordinate = obvApi.worldToClient(new THREE.Vector3(0, 0, 0))
-    showMessage(
-      '当前模型的屏幕坐标为：(' +
-        Math.round(screenCoordinate.x) +
-        ', ' +
-        Math.round(screenCoordinate.y) +
-        ')',
+  const result = CoordinateUtils.worldToClient(obvApi, { x: 0, y: 0, z: 0 })
+  
+  if (result.error) {
+    messageManager.showMessage(setMessage, result.error)
+  } else {
+    const coord = result.coordinate
+    messageManager.showMessage(
+      setMessage,
+      `当前模型的屏幕坐标为：(${Math.round(coord.x)}, ${Math.round(coord.y)})`
     )
-  } catch (error) {
-    console.error('坐标转换失败:', error)
-    showMessage('坐标转换失败：' + error.message)
   }
 }
 
@@ -138,49 +108,46 @@ function worldToClient() {
 function clientToWorld() {
   if (!obvApi) return
 
-  try {
-    const globalCoordinate = obvApi.clientToWorld(600, 400)
-    if (globalCoordinate === undefined) {
-      showMessage('模型不在当前位置范围！！')
-    } else {
-      showMessage(
-        '当前模型的世界坐标位置为：(' +
-          Math.round(globalCoordinate.x * 100) / 100 +
-          ', ' +
-          Math.round(globalCoordinate.y * 100) / 100 +
-          ', ' +
-          Math.round(globalCoordinate.z * 100) / 100 +
-          ')',
-      )
-    }
-  } catch (error) {
-    console.error('坐标转换失败:', error)
-    showMessage('坐标转换失败：' + error.message)
+  const result = CoordinateUtils.clientToWorld(obvApi, 600, 400)
+  
+  if (result.error) {
+    messageManager.showMessage(setMessage, result.error)
+  } else {
+    const coord = result.coordinate
+    messageManager.showMessage(
+      setMessage,
+      `当前模型的世界坐标位置为：(${Math.round(coord.x * 100) / 100}, ${Math.round(coord.y * 100) / 100}, ${Math.round(coord.z * 100) / 100})`
+    )
   }
 }
 
 onMounted(() => {
+  // 初始化消息管理器
+  messageManager = new MessageManager()
+  
   // 确保OBV对象已加载
-  if (typeof OBV === 'undefined') {
-    console.error('OBV库未加载')
-    return
+  const obvCheck = ValidationUtils.checkOBVLibrary()
+  if (!obvCheck.valid) {
+    console.error(obvCheck.message)
+    messageManager.showMessage(setMessage, obvCheck.message)
   }
 
-  // 确保THREE.js已加载
-  if (typeof THREE === 'undefined') {
-    console.error('THREE.js库未加载')
-    return
+  const threeCheck = ValidationUtils.checkTHREELibrary()
+  if (!threeCheck.valid) {
+    console.error(threeCheck.message)
+    messageManager.showMessage(setMessage, threeCheck.message)
   }
 })
 
 onUnmounted(() => {
   // 清理资源
-  if (obvApi) {
-    obvApi = null
+  if (messageManager) {
+    messageManager.destroy()
   }
-  if (messageTimer) {
-    clearTimeout(messageTimer)
+  if (loader) {
+    loader.destroy()
   }
+  obvApi = null
 })
 </script>
 

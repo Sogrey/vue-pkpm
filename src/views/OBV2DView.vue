@@ -21,92 +21,62 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { defaultUrns, modelTypes } from '../config/obv-config.js'
+import { MessageManager, ErrorHandler, BaseOBVLoader, ValidationUtils } from '../utils/obv-utils.js'
 
 // 定义urn，模型的唯一标识
-const urn = ref('urn:bimbox.object:viewing_bucket/drawComparison_A')
+const urn = ref(defaultUrns['2d'])
 const loading = ref(false)
 const message = ref('')
 let obvApi = null
 let viewerState = null
 let activeLayout = null
-let messageTimer = null
-
-// 访问的令牌
-const accessToken =
-  'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
-
-const expiresIn = 600000
-
-// 访问的令牌 getAccessToken 和 令牌有效期 expiresIn
-// 获取token值
-function getAccessToken(cb) {
-  cb(accessToken, expiresIn)
-}
-
-// 显示消息的辅助函数
-function showMessage(text, duration = 3000) {
-  message.value = text
-  if (messageTimer) {
-    clearTimeout(messageTimer)
-  }
-  messageTimer = setTimeout(() => {
-    message.value = ''
-  }, duration)
-}
+let loader = null
+let messageManager = null
 
 async function loadModel() {
-  if (!urn.value) return
+  if (!urn.value || !ValidationUtils.validateURN(urn.value)) {
+    messageManager.showMessage(setMessage, '请输入有效的模型URN')
+    return
+  }
 
   loading.value = true
 
   try {
-    // 创建实例需要传入的参数，部署环境serviceConfig 和 用户有效期getAccessToken
-    const applicationOptions = {
-      // 配置 OBV 服务端（BIMServer）API 服务的 origin，这个适合于私有部署的用户使用
-      getAccessToken: getAccessToken,
-      refreshAccessToken: getAccessToken,
-      serviceConfig: {
-        origin: 'https://api.cloud.pkpm.cn',
-        apiContextPath: '/bimserver/viewing/v3',
-      },
+    // 初始化加载器
+    loader = new BaseOBVLoader()
+    
+    // 检查库是否加载
+    const obvCheck = ValidationUtils.checkOBVLibrary()
+    if (!obvCheck.valid) {
+      throw new Error(obvCheck.message)
     }
 
-    // 实例化 Builder，用于模型加载
-    const builder = new OBV.Api.ObvBuilder()
-    // 创建 Application 对象
-    const application = await builder.buildApplication(applicationOptions)
-    // 创建 document 管理视图，加载完成后可以调用接口
-    const obvDocument = await builder.loadDocument(application, urn.value, 'dwg-lod')
-    // 创建 viewer 容器, 创建API
-    obvApi = await builder.buildViewer2d(application, document.getElementById('obv-view'))
-    // 获取二维视图
+    // 检查容器
+    const containerCheck = ValidationUtils.validateContainer(document.getElementById('obv-view'))
+    if (!containerCheck.valid) {
+      throw new Error(containerCheck.message)
+    }
+
+    // 加载文档
+    const obvDocument = await loader.loadDocument(urn.value, modelTypes['2d'])
+    
+    // 创建2D查看器
+    obvApi = await loader.create2DViewer(document.getElementById('obv-view'))
+    
+    // 获取二维视图并加载模型
     const viewer2dItems = obvDocument.get2dGeometryItems()
-    builder.load2dModels(obvApi, {
-      obvDocument: obvDocument,
-      viewer2dItem: viewer2dItems[0],
-    })
+    await loader.load2DModel(obvDocument, viewer2dItems[0])
 
     // 暴露到全局，方便调试
-    window.obvApi = obvApi
+    loader.exposeToGlobal()
 
-    showMessage('2D图纸加载成功')
+    messageManager.showMessage(setMessage, '2D图纸加载成功')
     console.log('2D图纸加载成功')
   } catch (error) {
     console.error('2D图纸加载失败:', error)
-    let errorMessage = '图纸加载失败'
-
-    // 安全地获取错误消息
-    const errorMsg = error && error.message ? error.message : String(error)
-
-    if (errorMsg.includes('network')) {
-      errorMessage = '网络连接失败，请检查网络连接'
-    } else if (errorMsg.includes('token')) {
-      errorMessage = '访问令牌无效，请重新授权'
-    } else {
-      errorMessage = '图纸加载失败：' + errorMsg
-    }
-
-    showMessage(errorMessage)
+    const errorMessage = ErrorHandler.handleError(error, '2D图纸')
+    messageManager.showMessage(setMessage, errorMessage)
   } finally {
     loading.value = false
   }
@@ -120,10 +90,11 @@ function getViewerState() {
     // 获取视图当前显示状态
     viewerState = obvApi.getViewerState()
     console.log('当前视图状态:', viewerState)
-    showMessage('已获取当前视角信息')
+    messageManager.showMessage(setMessage, '已获取当前视角信息')
   } catch (error) {
     console.error('获取视图状态失败:', error)
-    showMessage('获取视图状态失败：' + error.message)
+    const errorMessage = ErrorHandler.handleError(error, '获取视图状态')
+    messageManager.showMessage(setMessage, errorMessage)
   }
 }
 
@@ -141,29 +112,42 @@ function setViewerState() {
     } else {
       obvApi.setViewerState(viewerState)
     }
-    showMessage('视图状态设置成功')
+    messageManager.showMessage(setMessage, '视图状态设置成功')
   } catch (error) {
     console.error('设置视图状态失败:', error)
-    showMessage('设置视图状态失败：' + error.message)
+    const errorMessage = ErrorHandler.handleError(error, '设置视图状态')
+    messageManager.showMessage(setMessage, errorMessage)
   }
 }
 
+// 设置消息的函数
+function setMessage(text) {
+  message.value = text
+}
+
 onMounted(() => {
+  // 初始化消息管理器
+  messageManager = new MessageManager()
+  
   // 确保OBV对象已加载
-  if (typeof OBV === 'undefined') {
-    console.error('OBV库未加载')
-    return
+  const obvCheck = ValidationUtils.checkOBVLibrary()
+  if (!obvCheck.valid) {
+    console.error(obvCheck.message)
+    messageManager.showMessage(setMessage, obvCheck.message)
   }
 })
 
 onUnmounted(() => {
   // 清理资源
-  if (obvApi) {
-    obvApi = null
+  if (messageManager) {
+    messageManager.destroy()
   }
-  if (messageTimer) {
-    clearTimeout(messageTimer)
+  if (loader) {
+    loader.destroy()
   }
+  obvApi = null
+  viewerState = null
+  activeLayout = null
 })
 </script>
 

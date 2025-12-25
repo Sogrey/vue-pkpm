@@ -15,107 +15,90 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { defaultUrns, modelTypes } from '../config/obv-config.js'
+import { MessageManager, ErrorHandler, BaseOBVLoader, ValidationUtils } from '../utils/obv-utils.js'
 
-const urn = ref('urn:bimbox.object:viewing_bucket/pdf-demo')
+const urn = ref(defaultUrns['doc'])
 const loading = ref(false)
 const message = ref('')
 let obvApi = null
-let messageTimer = null
+let loader = null
+let messageManager = null
 
-// 访问的令牌
-const accessToken = 'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
-const expiresIn = 600000
-
-// 获取token值
-function getAccessToken(cb) {
-  cb(accessToken, expiresIn)
-}
-
-// 显示消息的辅助函数
-function showMessage(text, duration = 3000) {
+// 设置消息的函数
+function setMessage(text) {
   message.value = text
-  if (messageTimer) {
-    clearTimeout(messageTimer)
-  }
-  messageTimer = setTimeout(() => {
-    message.value = ''
-  }, duration)
 }
 
 async function loadModel() {
-  if (!urn.value) return
+  if (!urn.value || !ValidationUtils.validateURN(urn.value)) {
+    messageManager.showMessage(setMessage, '请输入有效的模型URN')
+    return
+  }
 
   loading.value = true
 
   try {
-    // 创建实例需要传入的参数，部署环境serviceConfig 和 用户有效期getAccessToken
-    const applicationOptions = {
-      // 配置 OBV 服务端（BIMServer）API 服务的 origin，这个适合于私有部署的用户使用
-      getAccessToken: getAccessToken,
-      refreshAccessToken: getAccessToken,
-      serviceConfig: {
-        origin: 'https://api.cloud.pkpm.cn',
-        apiContextPath: '/bimserver/viewing/v3',
-      },
+    // 初始化加载器
+    loader = new BaseOBVLoader()
+    
+    // 检查库是否加载
+    const obvCheck = ValidationUtils.checkOBVLibrary()
+    if (!obvCheck.valid) {
+      throw new Error(obvCheck.message)
     }
 
-    // 实例化 Builder，用于模型加载
-    const builder = new OBV.Api.ObvBuilder()
-    // 创建 Application 对象
-    const application = await builder.buildApplication(applicationOptions)
-    // 创建 document 管理视图，加载完成后可以调用接口
-    const obvDocument = await builder.loadDocument(application, urn.value)
-    // 创建 viewer 容器, 创建API
-    obvApi = await builder.buildViewerDoc(application, document.getElementById('obv-view'))
+    // 检查容器
+    const containerCheck = ValidationUtils.validateContainer(document.getElementById('obv-view'))
+    if (!containerCheck.valid) {
+      throw new Error(containerCheck.message)
+    }
 
-    // 获取Doc视图
+    // 加载文档
+    const obvDocument = await loader.loadDocument(urn.value, modelTypes['doc'])
+    
+    // 创建文档查看器
+    obvApi = await loader.createDocViewer(document.getElementById('obv-view'))
+    
+    // 获取Doc视图并加载模型
     const viewerDocItems = obvDocument.getDocItems()
-    builder.loadDocModels(obvApi, obvDocument, viewerDocItems[0])
+    await loader.loadDocModel(obvDocument, viewerDocItems[0])
 
     // 暴露到全局，方便调试
-    window.obvApi = obvApi
+    loader.exposeToGlobal()
 
-    showMessage('文档加载成功')
+    messageManager.showMessage(setMessage, '文档加载成功')
     console.log('文档加载成功')
   } catch (error) {
     console.error('文档加载失败:', error)
-    let errorMessage = '文档加载失败'
-    
-    // 安全地获取错误消息
-    const errorMsg = error && error.message ? error.message : String(error)
-    
-    if (errorMsg.includes('network')) {
-      errorMessage = '网络连接失败，请检查网络连接'
-    } else if (errorMsg.includes('token')) {
-      errorMessage = '访问令牌无效，请重新授权'
-    } else if (errorMsg.includes('file') || errorMsg.includes('format')) {
-      errorMessage = '文档格式不支持或文件损坏'
-    } else {
-      errorMessage = '文档加载失败：' + errorMsg
-    }
-    
-    showMessage(errorMessage)
+    const errorMessage = ErrorHandler.handleError(error, '文档')
+    messageManager.showMessage(setMessage, errorMessage)
   } finally {
     loading.value = false
   }
 }
 
 onMounted(() => {
+  // 初始化消息管理器
+  messageManager = new MessageManager()
+  
   // 确保OBV对象已加载
-  if (typeof OBV === 'undefined') {
-    console.error('OBV库未加载')
-    return
+  const obvCheck = ValidationUtils.checkOBVLibrary()
+  if (!obvCheck.valid) {
+    console.error(obvCheck.message)
+    messageManager.showMessage(setMessage, obvCheck.message)
   }
 })
 
 onUnmounted(() => {
   // 清理资源
-  if (obvApi) {
-    obvApi = null
+  if (messageManager) {
+    messageManager.destroy()
   }
-  if (messageTimer) {
-    clearTimeout(messageTimer)
+  if (loader) {
+    loader.destroy()
   }
+  obvApi = null
 })
 </script>
 
