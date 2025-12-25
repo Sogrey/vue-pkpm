@@ -7,31 +7,35 @@
         {{ loading ? '加载中...' : '加载模型' }}
       </button>
     </div>
-    
+
     <div v-if="obvApi" class="osgb-controls">
       <div class="control-group">
         <label class="control-label">
           设置高度值:
           <span class="value-display">{{ obliqueHeight.toFixed(1) }}</span>
-          <input 
-            v-model="obliqueHeight" 
-            type="range" 
-            min="-500" 
-            max="0" 
+          <input
+            v-model="obliqueHeight"
+            type="range"
+            min="-500"
+            max="0"
             step="1"
             class="range-input"
           />
         </label>
       </div>
-      
+
       <div class="button-group">
         <button @click="createGisMap" :disabled="haveMap" class="action-btn">载入GIS</button>
         <button @click="removeGisMap" :disabled="!haveMap" class="action-btn">卸载GIS</button>
-        <button @click="mergeBimModel" :disabled="haveBimModel || !haveMap" class="action-btn">载入BIM模型</button>
-        <button @click="unloadBimModel" :disabled="!haveBimModel" class="action-btn">卸载BIM模型</button>
+        <button @click="mergeBimModel" :disabled="haveBimModel || !haveMap" class="action-btn">
+          载入BIM模型
+        </button>
+        <button @click="unloadBimModel" :disabled="!haveBimModel" class="action-btn">
+          卸载BIM模型
+        </button>
       </div>
     </div>
-    
+
     <div v-if="message" class="message-toast">
       {{ message }}
     </div>
@@ -41,38 +45,27 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { defaultUrns, modelTypes } from '../config/obv-config.js'
+import {
+  MessageManager,
+  ErrorHandler,
+  BaseOBVLoader,
+  ModelUtils,
+  ValidationUtils,
+} from '../utils/obv-utils.js'
 
-const osgbUrn = ref('urn:bimbox.object:viewing_bucket/osgb-model')
-const bimUrn = ref('urn:bimbox.object:viewing_bucket/rvt-model')
+const osgbUrn = ref(defaultUrns['osgbzip'])
+const bimUrn = ref(defaultUrns['bim-merge'])
 const loading = ref(false)
 const message = ref('')
 const obliqueHeight = ref(-420)
 const haveMap = ref(false)
 const haveBimModel = ref(false)
+
 let obvApi = null
-let builder = null
+let loader = null
+let messageManager = null
 let urnMap = null
-let messageTimer = null
-
-// 访问的令牌
-const accessToken = 'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
-const expiresIn = 600000
-
-// 获取token值
-function getAccessToken(cb) {
-  cb(accessToken, expiresIn)
-}
-
-// 显示消息的辅助函数
-function showMessage(text, duration = 3000) {
-  message.value = text
-  if (messageTimer) {
-    clearTimeout(messageTimer)
-  }
-  messageTimer = setTimeout(() => {
-    message.value = ''
-  }, duration)
-}
 
 async function loadModel() {
   if (!osgbUrn.value) return
@@ -80,74 +73,49 @@ async function loadModel() {
   loading.value = true
 
   try {
-    const applicationOptions = {
-      getAccessToken: getAccessToken,
-      serviceConfig: {
-        origin: 'https://api.cloud.pkpm.cn',
-        apiContextPath: '/bimserver/viewing/v3',
-      },
-    }
+    loader = new BaseOBVLoader()
+    await loader.initApplication()
 
     const urnList = [
       {
         urn: osgbUrn.value,
-        jobType: 'osgbzip-lod'
-      }, 
+        jobType: modelTypes['osgbzip'],
+      },
       {
         urn: bimUrn.value,
-        jobType: 'rvt-lod'
-      }
+        jobType: modelTypes['3d'],
+      },
     ]
 
-    // 实例化 Builder
-    builder = new OBV.Api.ObvBuilder()
-    const application = await builder.buildApplication(applicationOptions)
-    
     // 创建document管理视图
-    urnMap = new Map()
-    for (let i = 0; i < urnList.length; i++) {
-      const document = await builder.loadDocument(application, urnList[i].urn, urnList[i].jobType)
-      urnMap.set(urnList[i].urn, document)
-    }
+    urnMap = await ModelUtils.createUrnMap(urnList, loader.builder, loader.application)
 
     const options = {
-      applicationId: application.id,
-      gisType: 'oblique'
+      applicationId: loader.application.id,
+      gisType: 'oblique',
     }
 
     // 创建viewer
-    obvApi = await builder.buildViewer3d(application, document.getElementById('obv-view'))
-    
+    obvApi = await loader.create3DViewer(document.getElementById('obv-view'))
+
     // 加载倾斜摄影模型
     await obvApi.createGisTileset(urnMap.get(osgbUrn.value), options)
-    
+
     // 设定倾斜摄影模型的高度
     obvApi.setGisTilesetHeight('oblique', obliqueHeight.value, osgbUrn.value)
-    
+
     // 切换为主视图
-    obvApi.setRequestHomeView()
+    ModelUtils.resetToHomeView(obvApi)
 
     // 暴露到全局，方便调试
-    window.obvApi = obvApi
+    loader.exposeToGlobal()
 
-    showMessage('倾斜摄影模型加载成功')
+    messageManager.showMessage((msg) => (message.value = msg), '倾斜摄影模型加载成功')
     console.log('倾斜摄影模型加载成功')
-
   } catch (error) {
     console.error('模型加载失败:', error)
-    let errorMessage = '模型加载失败'
-    
-    const errorMsg = error && error.message ? error.message : String(error)
-    
-    if (errorMsg.includes('network')) {
-      errorMessage = '网络连接失败，请检查网络连接'
-    } else if (errorMsg.includes('token')) {
-      errorMessage = '访问令牌无效，请重新授权'
-    } else {
-      errorMessage = '模型加载失败：' + errorMsg
-    }
-    
-    showMessage(errorMessage)
+    const errorMessage = ErrorHandler.handleError(error, '倾斜摄影模型')
+    messageManager.showMessage((msg) => (message.value = msg), errorMessage)
   } finally {
     loading.value = false
   }
@@ -160,14 +128,17 @@ async function createGisMap() {
       const gisPos = obvApi.getGisTilesetPosition('oblique', osgbUrn.value)
       console.log(gisPos.longitude, gisPos.latitude)
       obvApi.createGisMap(gisPos.longitude, gisPos.latitude)
-      obvApi.setRequestHomeView()
+      ModelUtils.resetToHomeView(obvApi)
       haveMap.value = true
-      showMessage('GIS地图加载成功')
+      messageManager.showMessage((msg) => (message.value = msg), 'GIS地图加载成功')
     } catch (error) {
-      showMessage('GIS地图加载失败：' + error.message)
+      messageManager.showMessage(
+        (msg) => (message.value = msg),
+        'GIS地图加载失败：' + error.message,
+      )
     }
   } else {
-    showMessage('GIS地图已经加载')
+    messageManager.showMessage((msg) => (message.value = msg), 'GIS地图已经加载')
   }
 }
 
@@ -176,34 +147,35 @@ function removeGisMap() {
   if (haveMap.value && obvApi) {
     obvApi.removeGisMap()
     haveMap.value = false
-    showMessage('GIS地图已卸载')
+    messageManager.showMessage((msg) => (message.value = msg), 'GIS地图已卸载')
   } else {
-    showMessage('GIS地图已经卸载')
+    messageManager.showMessage((msg) => (message.value = msg), 'GIS地图已经卸载')
   }
 }
 
 // 载入BIM模型
 async function mergeBimModel() {
   if (!haveMap.value) {
-    showMessage('请先加载GIS地图')
+    messageManager.showMessage((msg) => (message.value = msg), '请先加载GIS地图')
     return
   }
-  if (!haveBimModel.value && obvApi) {
+  if (!haveBimModel.value && loader) {
     try {
       const bimDocument = urnMap.get(bimUrn.value)
       const viewer3dItems = bimDocument.get3dGeometryItems()
-      await builder.load3dModels(obvApi, {
-        obvDocument: bimDocument,
-        viewer3dItem: viewer3dItems[0],
+      await loader.load3DModel(bimDocument, viewer3dItems[0], {
         modelOffset: { x: 650, y: -180, z: 5 },
       })
       haveBimModel.value = true
-      showMessage('BIM模型加载成功')
+      messageManager.showMessage((msg) => (message.value = msg), 'BIM模型加载成功')
     } catch (error) {
-      showMessage('BIM模型加载失败：' + error.message)
+      messageManager.showMessage(
+        (msg) => (message.value = msg),
+        'BIM模型加载失败：' + error.message,
+      )
     }
   } else {
-    showMessage('BIM模型已经加载')
+    messageManager.showMessage((msg) => (message.value = msg), 'BIM模型已经加载')
   }
 }
 
@@ -211,20 +183,17 @@ async function mergeBimModel() {
 function unloadBimModel() {
   if (haveBimModel.value && obvApi) {
     try {
-      const ids = obvApi.getModelIds()
-      for (let i = 0; i < ids.length; i++) {
-        let model = obvApi.getModelById(ids[i])
-        obvApi.unloadModel(ids[i])
-        model.dispose()
-        model = null
-      }
+      ModelUtils.unloadAllBIMModels(obvApi)
       haveBimModel.value = false
-      showMessage('BIM模型已卸载')
+      messageManager.showMessage((msg) => (message.value = msg), 'BIM模型已卸载')
     } catch (error) {
-      showMessage('BIM模型卸载失败：' + error.message)
+      messageManager.showMessage(
+        (msg) => (message.value = msg),
+        'BIM模型卸载失败：' + error.message,
+      )
     }
   } else {
-    showMessage('BIM模型已经卸载')
+    messageManager.showMessage((msg) => (message.value = msg), 'BIM模型已经卸载')
   }
 }
 
@@ -236,19 +205,22 @@ watch(obliqueHeight, (newHeight) => {
 })
 
 onMounted(() => {
-  if (typeof OBV === 'undefined') {
-    console.error('OBV库未加载')
-    showMessage('OBV库未加载，请刷新页面重试')
+  messageManager = new MessageManager()
+  const validation = ValidationUtils.checkOBVLibrary()
+  if (!validation.valid) {
+    messageManager.showMessage((msg) => (message.value = msg), validation.message)
     return
   }
 })
 
 onUnmounted(() => {
-  if (obvApi) {
-    obvApi = null
+  if (loader) {
+    loader.destroy()
+    loader = null
   }
-  if (messageTimer) {
-    clearTimeout(messageTimer)
+  if (messageManager) {
+    messageManager.destroy()
+    messageManager = null
   }
 })
 </script>
@@ -335,8 +307,12 @@ onUnmounted(() => {
 }
 
 @keyframes scanline {
-  0% { left: -100%; }
-  100% { left: 100%; }
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
 }
 
 .urn-input {

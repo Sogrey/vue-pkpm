@@ -16,43 +16,29 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { defaultUrns, defaultBimsIds, serviceConfig, authConfig } from '../config/obv-config.js'
+import { MessageManager } from '../utils/obv-utils.js'
 
-const urn = ref('urn:bimbox.object:viewing_bucket/pmodel-lod')
-const bimsId = ref('65e57e34993dc7fac12fce59')
+const urn = ref(defaultUrns['3dtiles-pmodel'])
+const bimsId = ref(defaultBimsIds['default'])
 const loading = ref(false)
 const message = ref('')
 let viewer = null
 let tileset2 = null
-let messageTimer = null
-
-// 访问的令牌
-const accessToken = 'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
-const expiresIn = 600000
-const host = "https://api.cloud.pkpm.cn"
+let messageManager = null
 
 // 获取token值
 function getAccessToken(cb) {
-  cb(accessToken, expiresIn)
-}
-
-// 显示消息的辅助函数
-function showMessage(text, duration = 3000) {
-  message.value = text
-  if (messageTimer) {
-    clearTimeout(messageTimer)
-  }
-  messageTimer = setTimeout(() => {
-    message.value = ''
-  }, duration)
+  cb(authConfig.accessToken, authConfig.expiresIn)
 }
 
 // 获取属性信息
 function getPro(pickedFeature) {
   if (typeof Cesium !== 'undefined' && Cesium.defined(pickedFeature)) {
     try {
-      var url = host + "/bims-api/bims/v2/subdatas/" + bimsId.value + "/components/search"
-      var batchId = pickedFeature._content.batchTable._propertyTable._jsonMetadataTable._properties.dbId[pickedFeature._batchId]
-      let senddata = {
+      const url = serviceConfig.origin + "/bims-api/bims/v2/subdatas/" + bimsId.value + "/components/search"
+      const batchId = pickedFeature._content.batchTable._propertyTable._jsonMetadataTable._properties.dbId[pickedFeature._batchId]
+      const senddata = {
         "propsConditions": [
           {
             "key": "batch:id",
@@ -77,14 +63,14 @@ function getPro(pickedFeature) {
         if (xhr.response) {
           try {
             const response = JSON.parse(xhr.response)
-            showMessage('属性信息：' + JSON.stringify(response))
+            messageManager.showMessage((msg) => message.value = msg, '属性信息：' + JSON.stringify(response))
           } catch (e) {
-            showMessage('属性信息：' + xhr.response)
+            messageManager.showMessage((msg) => message.value = msg, '属性信息：' + xhr.response)
           }
         }
       }
     } catch (error) {
-      showMessage('获取属性信息失败：' + error.message)
+      messageManager.showMessage((msg) => message.value = msg, '获取属性信息失败：' + error.message)
     }
   }
 }
@@ -207,7 +193,7 @@ async function loadModel() {
     window.viewer = viewer
     window.tileset = tileset2
 
-    showMessage('3DTiles模型加载成功')
+    messageManager.showMessage((msg) => message.value = msg, '3DTiles模型加载成功')
     console.log('3DTiles模型加载成功')
 
   } catch (error) {
@@ -226,7 +212,7 @@ async function loadModel() {
       errorMessage = '3DTiles模型加载失败：' + errorMsg
     }
     
-    showMessage(errorMessage)
+    messageManager.showMessage((msg) => message.value = msg, errorMessage)
   } finally {
     loading.value = false
   }
@@ -237,8 +223,8 @@ async function main() {
     getAccessToken: getAccessToken,
     refreshAccessToken: getAccessToken,
     serviceConfig: {
-      origin: host,
-      apiContextPath: '/bimserver/viewing/v3',
+      origin: serviceConfig.origin,
+      apiContextPath: serviceConfig.apiContextPath,
     },
   }
 
@@ -263,26 +249,27 @@ async function main() {
     }
   }
 
-  var urlHead = host + "/bimserver/viewing/v3/datas"
+  var urlHead = serviceConfig.origin + "/bimserver/viewing/v3/datas"
   var modelUrl = urlHead + resultkey + rePath
 
   return {
-    token: applicationOptions.serviceConfig.headers.Authorization,
+    token: authConfig.accessToken,
     url: modelUrl
   }
 }
 
 onMounted(() => {
+  messageManager = new MessageManager()
   // 检查Cesium和OBV库是否加载
   if (typeof Cesium === 'undefined') {
     console.error('Cesium库未加载')
-    showMessage('Cesium库未加载，请刷新页面重试')
+    messageManager.showMessage((msg) => message.value = msg, 'Cesium库未加载，请刷新页面重试')
     return
   }
   
   if (typeof OBV === 'undefined') {
     console.error('OBV库未加载')
-    showMessage('OBV库未加载，请刷新页面重试')
+    messageManager.showMessage((msg) => message.value = msg, 'OBV库未加载，请刷新页面重试')
     return
   }
 })
@@ -293,8 +280,9 @@ onUnmounted(() => {
     viewer.destroy()
     viewer = null
   }
-  if (messageTimer) {
-    clearTimeout(messageTimer)
+  if (messageManager) {
+    messageManager.destroy()
+    messageManager = null
   }
 })
 </script>

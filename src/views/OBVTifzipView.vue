@@ -43,38 +43,25 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { defaultUrns, modelTypes, serviceConfig, authConfig } from '../config/obv-config.js'
+import { MessageManager, ErrorHandler, BaseOBVLoader, ModelUtils, ValidationUtils } from '../utils/obv-utils.js'
 
-const bimUrn = ref('urn:bimbox.object:OBVCmnt_bucket/wei_lv_da_sha')
-const tifUrn = ref('urn:bimbox.object:viewing_bucket/多级数据测试_tifzip')
+const bimUrn = ref(defaultUrns['bim-weilv'])
+const tifUrn = ref(defaultUrns['tifzip'])
 const loading = ref(false)
 const message = ref('')
 const tifHeight = ref(-30)
 const haveTif = ref(true)
 const haveMap = ref(false)
 const haveBimModel = ref(false)
-let obvApi = null
-let builder = null
-let urnMap = null
-let messageTimer = null
 
-// 访问的令牌
-const accessToken = 'eyJhbGciOiJSUzI1NiJ9.eyJzY29wZSI6WyJvYnY6cmVhZCJdLCJleHAiOjE3NjY2NDEwNjEsImNsaWVudF9pZCI6ImFlY3dvcmtzLW9idi1jb21tdW5pdHkiLCJqdGkiOiIzNzhmM2Q4MS0yMGI4LTRjZWQtYWFhMi01OThmNjg1MDJhMDAifQ.Hkdyz_ZNqjzjjhc9hfOmXdervJqCNlsCGgotjTgu--9oSyU1TivYY-RysMOmlLcO4O7L2iTxwSyPaM02HRMvafCfemfg4VNY9JUdgW0M_1HdCPlOy67wTFT7aDBeAaWTKQ0VCDonEvKZ8uB1hMq19SsxniCTwDnqOq_ICxq5EmMGRaXemu5pDBre0KnkDBAt17pU_m1gH-QI3BNnl4aEuuiXdDL5jjv5oJdFYdgQ5JfOtAjg5yaqvOyypqo2jgPXwgv3XEpgrHdV3kKUG1Jv3nXyGmZjtHylYlpXE8tg3BOdZjqGlOt91yRnElfLhGQMkrtZwGumMUNJ-u3y9C28Rw'
-const expiresIn = 600000
+let loader = null
+let messageManager = null
+let urnMap = null
 
 // 获取token值
 function getAccessToken(cb) {
-  cb(accessToken, expiresIn)
-}
-
-// 显示消息的辅助函数
-function showMessage(text, duration = 3000) {
-  message.value = text
-  if (messageTimer) {
-    clearTimeout(messageTimer)
-  }
-  messageTimer = setTimeout(() => {
-    message.value = ''
-  }, duration)
+  cb(authConfig.accessToken, authConfig.expiresIn)
 }
 
 async function loadModel() {
@@ -86,8 +73,8 @@ async function loadModel() {
     const applicationOptions = {
       getAccessToken: getAccessToken,
       serviceConfig: {
-        origin: 'https://api.cloud.pkpm.cn',
-        apiContextPath: '/bimserver/viewing/v3',
+        origin: serviceConfig.origin,
+        apiContextPath: serviceConfig.apiContextPath,
       },
     }
 
