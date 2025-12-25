@@ -156,9 +156,6 @@ export const authConfig = {
     }
 }
 
-// 导出TokenManager供外部使用
-export { TokenManager }
-
 // 服务端配置
 export const serviceConfig = {
     origin: 'https://api.cloud.pkpm.cn',
