@@ -43,7 +43,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { defaultUrns, modelTypes, serviceConfig, authConfig } from '../config/obv-config.js'
+import { defaultUrns, modelTypes, serviceConfig, TokenManager } from '../config/obv-config.js'
 import { MessageManager, ErrorHandler, BaseOBVLoader, ModelUtils, ValidationUtils } from '../utils/obv-utils.js'
 
 const bimUrn = ref(defaultUrns['bim-weilv'])
@@ -75,7 +75,11 @@ function showMessage(msg) {
 
 // 获取token值
 function getAccessToken(cb) {
-  cb(authConfig.accessToken, authConfig.expiresIn)
+  if (TokenManager.isTokenExpired()) {
+    cb('', 0)
+    return
+  }
+  cb(TokenManager.getAccessToken(), TokenManager.getExpiresIn())
 }
 
 async function loadModel() {

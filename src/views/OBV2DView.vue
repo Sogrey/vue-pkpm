@@ -21,7 +21,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { defaultUrns, modelTypes } from '../config/obv-config.js'
+import { defaultUrns, modelTypes, TokenManager } from '../config/obv-config.js'
 import { MessageManager, ErrorHandler, BaseOBVLoader, ValidationUtils } from '../utils/obv-utils.js'
 
 // 定义urn，模型的唯一标识

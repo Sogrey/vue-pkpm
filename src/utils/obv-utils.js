@@ -3,7 +3,7 @@
  * 提供公共的OBV功能和工具函数
  */
 
-import { authConfig, getApplicationOptions, ErrorTypes } from '../config/obv-config.js'
+import { TokenManager, getApplicationOptions, ErrorTypes } from '../config/obv-config.js'
 
 /**
  * 消息提示工具类
@@ -57,10 +57,10 @@ export class ErrorHandler {
         type: ErrorTypes.NETWORK,
         message: '网络连接失败，请检查网络连接'
       }
-    } else if (errorMsg.includes('token') || errorMsg.includes('401')) {
+    } else if (errorMsg.includes('token') || errorMsg.includes('401') || errorMsg.includes('Unauthorized')) {
       return {
         type: ErrorTypes.TOKEN,
-        message: '访问令牌无效，请重新授权'
+        message: '访问令牌无效或已过期，请重新配置令牌'
       }
     } else if (errorMsg.includes('Bad File Format') || errorMsg.includes('HDR')) {
       return {

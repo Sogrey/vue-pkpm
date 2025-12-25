@@ -16,7 +16,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { defaultUrns, defaultBimsIds, serviceConfig, authConfig } from '../config/obv-config.js'
+import { defaultUrns, defaultBimsIds, serviceConfig, TokenManager } from '../config/obv-config.js'
 import { MessageManager } from '../utils/obv-utils.js'
 
 const urn = ref(defaultUrns['3dtiles-pmodel'])
@@ -29,7 +29,11 @@ let messageManager = null
 
 // 获取token值
 function getAccessToken(cb) {
-  cb(authConfig.accessToken, authConfig.expiresIn)
+  if (TokenManager.isTokenExpired()) {
+    cb('', 0)
+    return
+  }
+  cb(TokenManager.getAccessToken(), TokenManager.getExpiresIn())
 }
 
 // 获取属性信息
