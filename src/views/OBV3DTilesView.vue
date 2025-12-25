@@ -257,7 +257,7 @@ async function main() {
   var modelUrl = urlHead + resultkey + rePath
 
   return {
-    token: authConfig.accessToken,
+    token: TokenManager.getAccessToken(),
     url: modelUrl
   }
 }
