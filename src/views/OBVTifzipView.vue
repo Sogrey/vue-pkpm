@@ -58,6 +58,20 @@ const haveBimModel = ref(false)
 let loader = null
 let messageManager = null
 let urnMap = null
+let obvApi = null
+let builder = null
+let messageTimer = null
+
+// 显示消息的辅助函数
+function showMessage(msg) {
+  message.value = msg
+  if (messageTimer) {
+    clearTimeout(messageTimer)
+  }
+  messageTimer = setTimeout(() => {
+    message.value = ''
+  }, 3000)
+}
 
 // 获取token值
 function getAccessToken(cb) {
